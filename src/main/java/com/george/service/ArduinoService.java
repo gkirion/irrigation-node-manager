@@ -84,28 +84,31 @@ public class ArduinoService implements CommandLineRunner {
             if (bufferedReader.ready()) {
                 input = bufferedReader.readLine();
                 LOGGER.info("{}", input);
-                String[] tokens = input.split(":");
+                String[] tokens = input.split(",");
                 if (tokens.length == 2) {
 
-                    if (tokens[0].trim().equals("irrigation")) {
-                        synchronized (SYNCHRONIZATION_OBJECT) {
-                            if (tokens[1].trim().equals("1")) {
-                                irrigationStatus = Optional.of(IrrigationStatus.ON);
-                                SYNCHRONIZATION_OBJECT.notify();
+                    String place = tokens[0].trim();
+                    tokens = tokens[1].split(":");
+                    if (tokens.length == 2) {
 
-                            } else if (tokens[1].trim().equals("0")) {
-                                irrigationStatus = Optional.of(IrrigationStatus.OFF);
-                                SYNCHRONIZATION_OBJECT.notify();
+                        if (tokens[0].trim().equals("irrigation")) {
+                            synchronized (SYNCHRONIZATION_OBJECT) {
+                                if (tokens[1].trim().equals("1")) {
+                                    irrigationStatus = Optional.of(IrrigationStatus.ON);
+                                    SYNCHRONIZATION_OBJECT.notify();
+
+                                } else if (tokens[1].trim().equals("0")) {
+                                    irrigationStatus = Optional.of(IrrigationStatus.OFF);
+                                    SYNCHRONIZATION_OBJECT.notify();
+                                }
                             }
-                        }
-                    } else if (tokens[0].trim().equals("moisture")) {
-                        String[] sensorInputs = tokens[1].trim().split(" ");
-                        for (String sensorInput : sensorInputs) {
+                        } else if (tokens[0].trim().equals("moisture")) {
+                            String sensorInput = tokens[1].trim();
                             try {
                                 Double sensorInputNumber = Double.parseDouble(sensorInput);
                                 LOGGER.info("sensor input: {}", sensorInputNumber);
                                 SensorValue sensorValue = new SensorValue();
-                                sensorValue.setPlace("glastraki");
+                                sensorValue.setPlace(place);
                                 sensorValue.setValue(sensorInputNumber);
                                 channel.basicPublish("", QUEUE_NAME, null, OBJECT_MAPPER.writeValueAsBytes(sensorValue));
 
@@ -114,6 +117,7 @@ public class ArduinoService implements CommandLineRunner {
                                 e.printStackTrace();
                             }
                         }
+
                     }
 
                 }
