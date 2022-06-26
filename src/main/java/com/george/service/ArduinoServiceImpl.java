@@ -14,7 +14,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
+import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
@@ -28,6 +32,8 @@ public class ArduinoServiceImpl implements ArduinoService {
 
     private static final String QUEUE_NAME = "sensors-queue";
 
+    private String commandQueueName;
+
     private static final Object SYNCHRONIZATION_OBJECT = new Object();
 
     private Optional<IrrigationStatus> irrigationStatus = Optional.empty();
@@ -37,6 +43,8 @@ public class ArduinoServiceImpl implements ArduinoService {
     private BufferedWriter bufferedWriter;
 
     private Channel channel;
+
+    private Set<String> registeredExchanges = new HashSet<>();
 
     public ArduinoServiceImpl() throws IOException, TimeoutException {
         for (SerialPort serialPort : SerialPort.getCommPorts()) {
@@ -53,13 +61,33 @@ public class ArduinoServiceImpl implements ArduinoService {
         bufferedReader = new BufferedReader(inputStreamReader);
         bufferedWriter = new BufferedWriter((outputStreamWriter));
 
+        LOGGER.info("host ip: {}", InetAddress.getLocalHost());
+
         ConnectionFactory connectionFactory = new ConnectionFactory();
         connectionFactory.setHost("localhost");
         Connection connection = connectionFactory.newConnection();
         channel = connection.createChannel();
+
         LOGGER.info("declaring queue {}", QUEUE_NAME);
         AMQP.Queue.DeclareOk declareOk = channel.queueDeclare(QUEUE_NAME, false, false, false, null);
         LOGGER.info("declared queue {}", declareOk);
+
+        commandQueueName = channel.queueDeclare().getQueue();
+        LOGGER.info("declared command queue {}", commandQueueName);
+
+        channel.basicConsume(commandQueueName, true, (consumerTag, delivery) -> {
+
+            String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+            LOGGER.info("consumerTag: {}", consumerTag);
+            LOGGER.info("message: {}", message);
+            IrrigationStatus irrigationStatus = OBJECT_MAPPER.readValue(message, IrrigationStatus.class);
+            try {
+                setIrrigationStatus(irrigationStatus);
+            } catch (ArduinoServiceException e) {
+                e.printStackTrace();
+            }
+
+        }, consumerTag -> { LOGGER.info("consumer shutdown"); });
 
         ExecutorService executorService = Executors.newSingleThreadExecutor();
         executorService.submit(() -> {
@@ -113,6 +141,15 @@ public class ArduinoServiceImpl implements ArduinoService {
                     String place = tokens[0].trim();
                     String moisture = tokens[1].trim();
                     String irrigation = tokens[2].trim();
+
+                    if (!registeredExchanges.contains(place)) {
+                        AMQP.Exchange.DeclareOk declareOk = channel.exchangeDeclare(place, "fanout");
+                        LOGGER.info("declared exchange {}", declareOk);
+
+                        AMQP.Queue.BindOk bindOk = channel.queueBind(commandQueueName, place, "");
+                        LOGGER.info("declared binding {}", bindOk);
+                        registeredExchanges.add(place);
+                    }
 
                     try {
                         Double moistureNumber = Double.parseDouble(moisture);
