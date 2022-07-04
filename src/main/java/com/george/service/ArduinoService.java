@@ -11,32 +11,25 @@ import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
 
 import java.io.*;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
 
-@Service
-public class ArduinoServiceImpl implements ArduinoService {
+public class ArduinoService {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ArduinoServiceImpl.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(ArduinoService.class);
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private static final String QUEUE_NAME = "sensors-queue";
 
     private String commandQueueName;
-
-    private static final Object SYNCHRONIZATION_OBJECT = new Object();
-
-    private Optional<IrrigationStatus> irrigationStatus = Optional.empty();
 
     private BufferedReader bufferedReader;
 
@@ -46,16 +39,14 @@ public class ArduinoServiceImpl implements ArduinoService {
 
     private Set<String> registeredExchanges = new HashSet<>();
 
-    public ArduinoServiceImpl() throws IOException, TimeoutException {
-        for (SerialPort serialPort : SerialPort.getCommPorts()) {
-            LOGGER.info("serialPort: {} {}", serialPort.getSystemPortName(), serialPort);
-        }
-        SerialPort serialPort = SerialPort.getCommPort("COM5");
+    public ArduinoService(String port, String rabbitMQHost) throws IOException, TimeoutException, InterruptedException {
+        SerialPort serialPort = SerialPort.getCommPort(port);
         LOGGER.info("connecting to: {}", serialPort);
         serialPort.setComPortParameters(9600, 8, SerialPort.ONE_STOP_BIT, SerialPort.NO_PARITY);
         serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, 100, 0);
         serialPort.openPort();
         LOGGER.info("connected to: {}", serialPort);
+        Thread.sleep(2000);
         InputStreamReader inputStreamReader = new InputStreamReader(serialPort.getInputStream());
         OutputStreamWriter outputStreamWriter = new OutputStreamWriter(serialPort.getOutputStream());
         bufferedReader = new BufferedReader(inputStreamReader);
@@ -64,7 +55,7 @@ public class ArduinoServiceImpl implements ArduinoService {
         LOGGER.info("host ip: {}", InetAddress.getLocalHost());
 
         ConnectionFactory connectionFactory = new ConnectionFactory();
-        connectionFactory.setHost("localhost");
+        connectionFactory.setHost(rabbitMQHost);
         Connection connection = connectionFactory.newConnection();
         channel = connection.createChannel();
 
@@ -72,8 +63,9 @@ public class ArduinoServiceImpl implements ArduinoService {
         AMQP.Queue.DeclareOk declareOk = channel.queueDeclare(QUEUE_NAME, false, false, false, null);
         LOGGER.info("declared queue {}", declareOk);
 
-        commandQueueName = channel.queueDeclare().getQueue();
-        LOGGER.info("declared command queue {}", commandQueueName);
+        declareOk = channel.queueDeclare();
+        LOGGER.info("declared command queue {}", declareOk);
+        commandQueueName = declareOk.getQueue();
 
         channel.basicConsume(commandQueueName, true, (consumerTag, delivery) -> {
 
@@ -99,33 +91,14 @@ public class ArduinoServiceImpl implements ArduinoService {
         });
     }
 
-    @Override
-    public IrrigationStatus getIrrigationStatus() throws ArduinoServiceException {
+    public void setIrrigationStatus(IrrigationStatus irrigationStatus) throws ArduinoServiceException {
 
-        synchronized (SYNCHRONIZATION_OBJECT) {
-            while (irrigationStatus.isEmpty()) {
-                try {
-                    SYNCHRONIZATION_OBJECT.wait();
-                } catch (InterruptedException e) {
-                    throw new ArduinoServiceException(e);
-                }
-            }
-            return irrigationStatus.get();
-        }
-
-    }
-
-    @Override
-    public IrrigationStatus setIrrigationStatus(IrrigationStatus irrigationStatus) throws ArduinoServiceException {
-
-        IrrigationStatus previousIrrigationStatus = getIrrigationStatus();
         try {
             bufferedWriter.write(irrigationStatus.getSymbol());
             bufferedWriter.flush();
         } catch (IOException e) {
             throw new ArduinoServiceException(e);
         }
-        return previousIrrigationStatus;
 
     }
 
@@ -162,10 +135,6 @@ public class ArduinoServiceImpl implements ArduinoService {
 
                         } else if (irrigation.equals("0")) {
                             landStatus.setIrrigationStatus(IrrigationStatus.OFF);
-                        }
-                        synchronized (SYNCHRONIZATION_OBJECT) {
-                            irrigationStatus = Optional.of(landStatus.getIrrigationStatus());
-                            SYNCHRONIZATION_OBJECT.notify();
                         }
 
                         channel.basicPublish("", QUEUE_NAME, null, OBJECT_MAPPER.writeValueAsBytes(landStatus));
