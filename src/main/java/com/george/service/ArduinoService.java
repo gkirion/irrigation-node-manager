@@ -29,6 +29,8 @@ public class ArduinoService {
 
     private static final String QUEUE_NAME = "sensors-queue";
 
+    private static final String EXCHANGE_NAME = "commands-exchange";
+
     private String commandQueueName;
 
     private BufferedReader bufferedReader;
@@ -37,13 +39,13 @@ public class ArduinoService {
 
     private Channel channel;
 
-    private Set<String> registeredExchanges = new HashSet<>();
+    private Set<String> registeredRoutingKeys = new HashSet<>();
 
     public ArduinoService(String port, String rabbitMQHost) throws IOException, TimeoutException, InterruptedException {
         SerialPort serialPort = SerialPort.getCommPort(port);
         LOGGER.info("connecting to: {}", serialPort);
         serialPort.setComPortParameters(9600, 8, SerialPort.ONE_STOP_BIT, SerialPort.NO_PARITY);
-        serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, 100, 0);
+        serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, 200, 0);
         serialPort.openPort();
         LOGGER.info("connected to: {}", serialPort);
         Thread.sleep(2000);
@@ -66,6 +68,9 @@ public class ArduinoService {
         declareOk = channel.queueDeclare();
         LOGGER.info("declared command queue {}", declareOk);
         commandQueueName = declareOk.getQueue();
+
+        AMQP.Exchange.DeclareOk exchangeDeclareOk = channel.exchangeDeclare(EXCHANGE_NAME, "direct");
+        LOGGER.info("declared exchange {}", exchangeDeclareOk);
 
         channel.basicConsume(commandQueueName, true, (consumerTag, delivery) -> {
 
@@ -115,13 +120,10 @@ public class ArduinoService {
                     String moisture = tokens[1].trim();
                     String irrigation = tokens[2].trim();
 
-                    if (!registeredExchanges.contains(place)) {
-                        AMQP.Exchange.DeclareOk declareOk = channel.exchangeDeclare(place, "fanout");
-                        LOGGER.info("declared exchange {}", declareOk);
-
-                        AMQP.Queue.BindOk bindOk = channel.queueBind(commandQueueName, place, "");
+                    if (!registeredRoutingKeys.contains(place)) {
+                        AMQP.Queue.BindOk bindOk = channel.queueBind(commandQueueName, EXCHANGE_NAME, place);
                         LOGGER.info("declared binding {}", bindOk);
-                        registeredExchanges.add(place);
+                        registeredRoutingKeys.add(place);
                     }
 
                     try {
