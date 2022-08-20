@@ -48,7 +48,6 @@ public class ArduinoService {
         serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, 200, 0);
         serialPort.openPort();
         LOGGER.info("connected to: {}", serialPort);
-        Thread.sleep(2000);
         InputStreamReader inputStreamReader = new InputStreamReader(serialPort.getInputStream());
         OutputStreamWriter outputStreamWriter = new OutputStreamWriter(serialPort.getOutputStream());
         bufferedReader = new BufferedReader(inputStreamReader);
@@ -75,11 +74,13 @@ public class ArduinoService {
         channel.basicConsume(commandQueueName, true, (consumerTag, delivery) -> {
 
             String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
+            String routingKey = delivery.getEnvelope().getRoutingKey();
             LOGGER.info("consumerTag: {}", consumerTag);
             LOGGER.info("message: {}", message);
+            LOGGER.info("routing key: {}", routingKey);
             IrrigationStatus irrigationStatus = OBJECT_MAPPER.readValue(message, IrrigationStatus.class);
             try {
-                setIrrigationStatus(irrigationStatus);
+                setIrrigationStatus(routingKey, irrigationStatus);
             } catch (ArduinoServiceException e) {
                 e.printStackTrace();
             }
@@ -96,10 +97,11 @@ public class ArduinoService {
         });
     }
 
-    public void setIrrigationStatus(IrrigationStatus irrigationStatus) throws ArduinoServiceException {
+    public void setIrrigationStatus(String place, IrrigationStatus irrigationStatus) throws ArduinoServiceException {
 
         try {
-            bufferedWriter.write(irrigationStatus.getSymbol());
+            bufferedWriter.write(place + "," + irrigationStatus.getSymbol());
+            bufferedWriter.newLine();
             bufferedWriter.flush();
         } catch (IOException e) {
             throw new ArduinoServiceException(e);
