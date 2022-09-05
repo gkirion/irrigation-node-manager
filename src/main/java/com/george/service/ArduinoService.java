@@ -41,7 +41,7 @@ public class ArduinoService {
 
     private Set<String> registeredRoutingKeys = new HashSet<>();
 
-    public ArduinoService(String port, String rabbitMQHost) throws IOException, TimeoutException, InterruptedException {
+    public ArduinoService(String port, String rabbitMQHost) throws IOException, TimeoutException {
         SerialPort serialPort = SerialPort.getCommPort(port);
         LOGGER.info("connecting to: {}", serialPort);
         serialPort.setComPortParameters(9600, 8, SerialPort.ONE_STOP_BIT, SerialPort.NO_PARITY);
@@ -100,8 +100,7 @@ public class ArduinoService {
     public void setIrrigationStatus(String place, IrrigationStatus irrigationStatus) throws ArduinoServiceException {
 
         try {
-            bufferedWriter.write(place + "," + irrigationStatus.getSymbol());
-            bufferedWriter.newLine();
+            bufferedWriter.write(place + "," + irrigationStatus.getSymbol() + System.lineSeparator());
             bufferedWriter.flush();
         } catch (IOException e) {
             throw new ArduinoServiceException(e);
