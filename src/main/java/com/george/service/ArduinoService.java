@@ -46,7 +46,10 @@ public class ArduinoService {
         LOGGER.info("connecting to: {}", serialPort);
         serialPort.setComPortParameters(9600, 8, SerialPort.ONE_STOP_BIT, SerialPort.NO_PARITY);
         serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, 200, 0);
-        serialPort.openPort();
+        boolean connected = serialPort.openPort();
+        if (!connected) {
+            throw new RuntimeException("could not connect to " + port);
+        }
         LOGGER.info("connected to: {}", serialPort);
         InputStreamReader inputStreamReader = new InputStreamReader(serialPort.getInputStream());
         OutputStreamWriter outputStreamWriter = new OutputStreamWriter(serialPort.getOutputStream());
@@ -93,6 +96,7 @@ public class ArduinoService {
                 run();
             } catch (Exception e) {
                 e.printStackTrace();
+                System.exit(1);
             }
         });
     }
