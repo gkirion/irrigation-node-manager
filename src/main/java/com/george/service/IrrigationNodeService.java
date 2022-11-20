@@ -15,13 +15,16 @@ public class IrrigationNodeService implements CommandLineRunner  {
     @Value("${rabbitmq-host:localhost}")
     private String rabbitMQHost;
 
+    @Value("${serial.maxNumberOfAttempts:3}")
+    private int maxNumberOfAttempts;
+
     @Override
     public void run(String... args) throws Exception {
 
         for (SerialPort serialPort : SerialPort.getCommPorts()) {
             LOGGER.info("serialPort: {} {}", serialPort.getSystemPortName(), serialPort);
         }
-        ArduinoService arduinoService = new ArduinoService("COM5", rabbitMQHost);
+        ArduinoService arduinoService = new ArduinoService("COM3", rabbitMQHost, maxNumberOfAttempts);
 
     }
 

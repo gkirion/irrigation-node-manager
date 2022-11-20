@@ -41,16 +41,25 @@ public class ArduinoService {
 
     private Set<String> registeredRoutingKeys = new HashSet<>();
 
-    public ArduinoService(String port, String rabbitMQHost) throws IOException, TimeoutException {
+    public ArduinoService(String port, String rabbitMQHost, int maxNumberOfAttempts) throws IOException, TimeoutException {
         SerialPort serialPort = SerialPort.getCommPort(port);
         LOGGER.info("connecting to: {}", serialPort);
         serialPort.setComPortParameters(9600, 8, SerialPort.ONE_STOP_BIT, SerialPort.NO_PARITY);
         serialPort.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, 200, 0);
-        boolean connected = serialPort.openPort();
+        boolean connected;
+        int attemptNumber = 0;
+
+        do {
+            attemptNumber++;
+            LOGGER.info("connection attempt: {}, max number of attempts: {}", attemptNumber, maxNumberOfAttempts);
+            connected = serialPort.openPort();
+        } while (!connected && attemptNumber < maxNumberOfAttempts);
+
         if (!connected) {
             throw new RuntimeException("could not connect to " + port);
         }
         LOGGER.info("connected to: {}", serialPort);
+
         InputStreamReader inputStreamReader = new InputStreamReader(serialPort.getInputStream());
         OutputStreamWriter outputStreamWriter = new OutputStreamWriter(serialPort.getOutputStream());
         bufferedReader = new BufferedReader(inputStreamReader);
@@ -112,7 +121,7 @@ public class ArduinoService {
 
     }
 
-    public void run(String... args) throws Exception {
+    private void run(String... args) throws Exception {
         String input;
         while (true) {
             if (bufferedReader.ready()) {
