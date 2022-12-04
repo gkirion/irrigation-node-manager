@@ -56,7 +56,7 @@ public class ArduinoService {
         } while (!connected && attemptNumber < maxNumberOfAttempts);
 
         if (!connected) {
-            throw new RuntimeException("could not connect to " + port);
+            throw new RuntimeException("could not connect to " + serialPort);
         }
         LOGGER.info("connected to: {}", serialPort);
 

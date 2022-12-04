@@ -7,6 +7,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Service;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 @Service
 public class IrrigationNodeService implements CommandLineRunner  {
 
@@ -21,10 +24,20 @@ public class IrrigationNodeService implements CommandLineRunner  {
     @Override
     public void run(String... args) throws Exception {
 
+        ExecutorService threadPoolExecutor = Executors.newFixedThreadPool(SerialPort.getCommPorts().length);
         for (SerialPort serialPort : SerialPort.getCommPorts()) {
             LOGGER.info("serialPort: {} {}", serialPort.getSystemPortName(), serialPort);
+
+                threadPoolExecutor.submit(() -> {
+                    try {
+                        new ArduinoService(serialPort.getSystemPortName(), rabbitMQHost, maxNumberOfAttempts);
+
+                    } catch (Exception e) {
+                        LOGGER.info("could not create arduino service for: {} {}", serialPort.getSystemPortName(), serialPort, e);
+                    }
+                });
+
         }
-        ArduinoService arduinoService = new ArduinoService("COM3", rabbitMQHost, maxNumberOfAttempts);
 
     }
 
