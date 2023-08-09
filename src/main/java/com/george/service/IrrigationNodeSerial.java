@@ -1,47 +1,31 @@
 package com.george.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fazecast.jSerialComm.SerialPort;
-import com.george.exception.ArduinoServiceException;
-import com.george.model.IrrigationStatus;
+import com.george.exception.IrrigationNodeException;
 import com.george.model.LandStatus;
-import com.rabbitmq.client.AMQP;
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.Connection;
-import com.rabbitmq.client.ConnectionFactory;
+import com.george.model.Status;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
-import java.net.InetAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeoutException;
 
-public class ArduinoService {
+public class IrrigationNodeSerial implements IrrigationCommandReceiver {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ArduinoService.class);
-
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
-    private static final String QUEUE_NAME = "sensors-queue";
-
-    private static final String EXCHANGE_NAME = "commands-exchange";
-
-    private String commandQueueName;
+    private static final Logger LOGGER = LoggerFactory.getLogger(IrrigationNodeSerial.class);
 
     private BufferedReader bufferedReader;
 
     private BufferedWriter bufferedWriter;
 
-    private Channel channel;
-
     private Set<String> registeredRoutingKeys = new HashSet<>();
 
-    public ArduinoService(String port, String rabbitMQHost, int maxNumberOfAttempts) throws IOException, TimeoutException {
+    private IrrigationQueue irrigationQueue;
+
+    public IrrigationNodeSerial(String port, int maxNumberOfAttempts, IrrigationQueue irrigationQueue) {
         SerialPort serialPort = SerialPort.getCommPort(port);
         LOGGER.info("connecting to: {}", serialPort);
         serialPort.setComPortParameters(9600, 8, SerialPort.ONE_STOP_BIT, SerialPort.NO_PARITY);
@@ -65,44 +49,12 @@ public class ArduinoService {
         bufferedReader = new BufferedReader(inputStreamReader);
         bufferedWriter = new BufferedWriter((outputStreamWriter));
 
-        LOGGER.info("host ip: {}", InetAddress.getLocalHost());
-
-        ConnectionFactory connectionFactory = new ConnectionFactory();
-        connectionFactory.setHost(rabbitMQHost);
-        Connection connection = connectionFactory.newConnection();
-        channel = connection.createChannel();
-
-        LOGGER.info("declaring queue {}", QUEUE_NAME);
-        AMQP.Queue.DeclareOk declareOk = channel.queueDeclare(QUEUE_NAME, false, false, false, null);
-        LOGGER.info("declared queue {}", declareOk);
-
-        declareOk = channel.queueDeclare();
-        LOGGER.info("declared command queue {}", declareOk);
-        commandQueueName = declareOk.getQueue();
-
-        AMQP.Exchange.DeclareOk exchangeDeclareOk = channel.exchangeDeclare(EXCHANGE_NAME, "direct");
-        LOGGER.info("declared exchange {}", exchangeDeclareOk);
-
-        channel.basicConsume(commandQueueName, true, (consumerTag, delivery) -> {
-
-            String message = new String(delivery.getBody(), StandardCharsets.UTF_8);
-            String routingKey = delivery.getEnvelope().getRoutingKey();
-            LOGGER.info("consumerTag: {}", consumerTag);
-            LOGGER.info("message: {}", message);
-            LOGGER.info("routing key: {}", routingKey);
-            IrrigationStatus irrigationStatus = OBJECT_MAPPER.readValue(message, IrrigationStatus.class);
-            try {
-                setIrrigationStatus(routingKey, irrigationStatus);
-            } catch (ArduinoServiceException e) {
-                e.printStackTrace();
-            }
-
-        }, consumerTag -> { LOGGER.info("consumer shutdown"); });
+        this.irrigationQueue = irrigationQueue;
 
         ExecutorService executorService = Executors.newSingleThreadExecutor();
         executorService.submit(() -> {
             try {
-                run();
+                readSerial();
             } catch (Exception e) {
                 e.printStackTrace();
                 System.exit(1);
@@ -110,18 +62,18 @@ public class ArduinoService {
         });
     }
 
-    public void setIrrigationStatus(String place, IrrigationStatus irrigationStatus) throws ArduinoServiceException {
+    private void setIrrigationStatus(String place, Status irrigationStatus) throws IrrigationNodeException {
 
         try {
             bufferedWriter.write(place + "," + irrigationStatus.getSymbol() + System.lineSeparator());
             bufferedWriter.flush();
         } catch (IOException e) {
-            throw new ArduinoServiceException(e);
+            throw new IrrigationNodeException(e);
         }
 
     }
 
-    private void run(String... args) throws Exception {
+    private void readSerial() throws Exception {
         String input;
         while (true) {
             if (bufferedReader.ready()) {
@@ -135,8 +87,7 @@ public class ArduinoService {
                     String irrigation = tokens[2].trim();
 
                     if (!registeredRoutingKeys.contains(place)) {
-                        AMQP.Queue.BindOk bindOk = channel.queueBind(commandQueueName, EXCHANGE_NAME, place);
-                        LOGGER.info("declared binding {}", bindOk);
+                        irrigationQueue.addIrrigationCommandReceiver(place, this);
                         registeredRoutingKeys.add(place);
                     }
 
@@ -147,13 +98,13 @@ public class ArduinoService {
                         landStatus.setPlace(place);
                         landStatus.setMoisture(moistureNumber);
                         if (irrigation.equals("1")) {
-                            landStatus.setIrrigationStatus(IrrigationStatus.ON);
+                            landStatus.setIrrigationStatus(Status.ON);
 
                         } else if (irrigation.equals("0")) {
-                            landStatus.setIrrigationStatus(IrrigationStatus.OFF);
+                            landStatus.setIrrigationStatus(Status.OFF);
                         }
 
-                        channel.basicPublish("", QUEUE_NAME, null, OBJECT_MAPPER.writeValueAsBytes(landStatus));
+                        irrigationQueue.sendSensorReading(landStatus);
 
                     } catch (NumberFormatException e) {
                         LOGGER.warn("exception: {}", e.getMessage());
@@ -164,6 +115,15 @@ public class ArduinoService {
             } else {
                 Thread.sleep(10);
             }
+        }
+    }
+
+    @Override
+    public void receiveCommand(String place, Status irrigationStatus) {
+        try {
+            setIrrigationStatus(place, irrigationStatus);
+        } catch (IrrigationNodeException e) {
+            e.printStackTrace();
         }
     }
 

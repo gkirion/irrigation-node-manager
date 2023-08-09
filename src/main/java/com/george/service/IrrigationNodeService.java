@@ -3,6 +3,7 @@ package com.george.service;
 import com.fazecast.jSerialComm.SerialPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Service;
@@ -15,11 +16,11 @@ public class IrrigationNodeService implements CommandLineRunner  {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(IrrigationNodeService.class);
 
-    @Value("${rabbitmq-host:localhost}")
-    private String rabbitMQHost;
-
     @Value("${serial.maxNumberOfAttempts:3}")
     private int maxNumberOfAttempts;
+
+    @Autowired
+    private IrrigationQueue irrigationQueue;
 
     @Override
     public void run(String... args) throws Exception {
@@ -30,7 +31,7 @@ public class IrrigationNodeService implements CommandLineRunner  {
 
                 threadPoolExecutor.submit(() -> {
                     try {
-                        new ArduinoService(serialPort.getSystemPortName(), rabbitMQHost, maxNumberOfAttempts);
+                        new IrrigationNodeSerial(serialPort.getSystemPortName(), maxNumberOfAttempts, irrigationQueue);
 
                     } catch (Exception e) {
                         LOGGER.info("could not create arduino service for: {} {}", serialPort.getSystemPortName(), serialPort, e);
